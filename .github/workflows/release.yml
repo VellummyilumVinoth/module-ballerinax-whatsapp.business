@@ -5,11 +5,6 @@ on:
   repository_dispatch:
     types: [ stdlib-release-pipeline ]
 
-concurrency:
-  # No workflows can run parallel as these are run against the same system
-  group: ${{ github.repository }}
-  cancel-in-progress: true
-
 jobs:
   call_workflow:
     name: Run Release Workflow

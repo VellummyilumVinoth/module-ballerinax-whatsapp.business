@@ -6,8 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # No workflows can run parallel as these are run against the same system
-  group: ${{ github.repository }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
   cancel-in-progress: true
 
 jobs:
