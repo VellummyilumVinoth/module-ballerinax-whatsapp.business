@@ -143,6 +143,7 @@ const ERR_ON_PHONE_NUMBER_QUALITY_UPDATE_HANDLER = "Error in onPhoneNumberQualit
 const ERR_ON_SECURITY_HANDLER = "Error in onSecurity handler";
 const ERR_ON_TEMPLATE_CATEGORY_UPDATE_HANDLER = "Error in onTemplateCategoryUpdate handler";
 const ERR_ON_ERROR_HANDLER = "Error in onError handler";
+const ERR_ACK_FAILED = "Failed to acknowledge the WhatsApp webhook notification";
 
 // ── Other Constants ─────────────────────────────────────────────────────────────
 

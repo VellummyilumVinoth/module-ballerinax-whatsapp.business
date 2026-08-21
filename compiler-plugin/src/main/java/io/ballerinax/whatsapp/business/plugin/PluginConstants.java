@@ -55,9 +55,9 @@ final class PluginConstants {
                 "onAccountReviewUpdate, onAccountUpdate, onBusinessCapabilityUpdate, " +
                 "onMessageTemplateQualityUpdate, onMessageTemplateStatusUpdate, onPhoneNumberNameUpdate, " +
                 "onPhoneNumberQualityUpdate, onSecurity, onTemplateCategoryUpdate, onError.", "WHATSAPP_103"),
-        INVALID_PARAMETER_COUNT("Invalid parameter count. The '%s' handler must accept exactly one parameter.",
-                "WHATSAPP_104"),
-        INVALID_PARAMETER_TYPE("Invalid parameter type for the '%s' handler. Expected '%s'.", "WHATSAPP_105"),
+        INVALID_PARAMETER_COUNT("Invalid parameter count. The '%s' handler accepts a mandatory '%s' parameter " +
+                "and an optional 'business:Caller' parameter.", "WHATSAPP_104"),
+        INVALID_PARAMETER_TYPE("Invalid type for the '%s' handler's %s parameter. Expected '%s'.", "WHATSAPP_105"),
         INVALID_RETURN_TYPE("Invalid return type for the '%s' handler. Must return error?.", "WHATSAPP_106");
 
         private final String error;

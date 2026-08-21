@@ -22,12 +22,18 @@
 # a field outside this closed set) is logged and dropped rather than delivered anywhere.
 #
 # An eleventh, optional handler, `onError`, does not correspond to a webhook field. It fires when
-# one of the ten handlers above returns an `error` while being dispatched — the notification has
-# already been acknowledged to Meta by that point, so this is the only way to react to a handler
-# failure other than logging (which always happens regardless of whether `onError` is declared).
+# one of the ten handlers above returns an `error` while being dispatched — with the default
+# `autoAck: true`, the notification has already been acknowledged to Meta by that point, so this is
+# the only way to react to a handler failure other than logging (which always happens regardless of
+# whether `onError` is declared).
+#
+# Each handler may optionally declare a second `Caller` parameter for manual acknowledgement (see
+# `ServiceConfig`/`WhatsAppServiceConfig.autoAck`), e.g.
+# `onMessages(MessagesNotification notification, Caller caller)`.
 #
 # A compiler plugin validates every remote function you do declare: its name must be one of the
-# eleven below, its parameter must match the documented event type, and it must return `error?`.
+# eleven below, its parameter(s) must match the documented event type (and, if a second parameter
+# is declared, `Caller`), and it must return `error?`.
 #
 # - `remote function onMessages(MessagesNotification notification) returns error?` — Inbound
 #   messages or status updates; see `MessagesNotification` for narrowing.
@@ -64,3 +70,18 @@ public type WhatsAppService distinct service object {
     // remote function onTemplateCategoryUpdate(TemplateCategoryUpdate update) returns error?;
     // remote function onError(HandlerError handlerError) returns error?;
 };
+
+# Configuration for a `WhatsAppService`'s acknowledgement behavior.
+@display {label: "Service Config"}
+public type WhatsAppServiceConfig record {|
+    # Whether the listener acknowledges (`200 OK`) a notification automatically as soon as it's
+    # received, before any handler runs. Set to `false` to take control of this yourself —
+    # declare a handler's optional second parameter as a `Caller` and call `caller->complete()`
+    # when ready; see `Caller`. Defaults to `true` (automatic acknowledgement).
+    @display {label: "Auto Ack"}
+    boolean autoAck = true;
+|};
+
+# Configures a `WhatsAppService`'s acknowledgement behavior. Optional — a service with no
+# `@ServiceConfig` behaves as though `autoAck: true` were set.
+public annotation WhatsAppServiceConfig ServiceConfig on service, class;

@@ -21,11 +21,11 @@ import ballerina/http;
 # inbound messages and status updates to an attached `WhatsAppService`.
 #
 # ```ballerina
-# listener whatsapp:Listener whatsappListener = new (8090, verifyToken = "my-token", appSecret = "my-secret");
+# listener business:Listener whatsappListener = new (8090, verifyToken = "my-token", appSecret = "my-secret");
 #
-# service whatsapp:WhatsAppService on whatsappListener {
-#     remote function onMessages(whatsapp:MessagesNotification notification) returns error? {
-#         if notification is whatsapp:Messages {
+# service business:WhatsAppService on whatsappListener {
+#     remote function onMessages(business:MessagesNotification notification) returns error? {
+#         if notification is business:Messages {
 #             // handle inbound messages: notification.messages
 #         } else {
 #             // handle status updates: notification.statuses
@@ -34,6 +34,12 @@ import ballerina/http;
 #     // ... plus any of the other nine (all optional) handlers you need
 # }
 # ```
+#
+# By default, each notification is acknowledged (`200 OK`) automatically as soon as it's received,
+# before any handler runs. Annotate an attached service with `ServiceConfig` and set
+# `autoAck: false` to take control of this yourself — declare a handler's optional second
+# parameter as a `Caller` and call `caller->complete()` when ready; see `Caller` and
+# `ServiceConfig`.
 @display {label: "Whatsapp Business", iconPath: "icon.png"}
 public class Listener {
     private final http:Listener httpListener;
@@ -45,7 +51,7 @@ public class Listener {
     #
     # + listenTo - A port number to bind a new `http:Listener` to, or an existing `http:Listener`
     # + config - The listener configuration (verify token and app secret; both required)
-    # + return - A `whatsapp:Error` (specifically a `whatsapp:ListenerError`) if the listener could
+    # + return - A `business:Error` (specifically a `business:ListenerError`) if the listener could
     #            not be initialized, otherwise `()`
     public function init(int|http:Listener listenTo, *ListenerConfig config) returns Error? {
         if listenTo is int {
@@ -65,10 +71,11 @@ public class Listener {
     #
     # + whatsappService - The service that handles webhook events
     # + name - The path (or path segments) to attach the service on; defaults to the listener root
-    # + return - A `whatsapp:Error` (specifically a `whatsapp:ListenerError`) if attaching failed,
+    # + return - A `business:Error` (specifically a `business:ListenerError`) if attaching failed,
     #            otherwise `()`
     public function attach(WhatsAppService whatsappService, string[]|string? name = ()) returns Error? {
-        HttpService httpService = new (whatsappService, self.verifyToken, self.appSecret);
+        WhatsAppServiceConfig serviceConfig = (typeof whatsappService).@ServiceConfig ?: {};
+        HttpService httpService = new (whatsappService, self.verifyToken, self.appSecret, serviceConfig.autoAck);
         self.httpService = httpService;
         error? result = self.httpListener.attach(httpService, name);
         if result is error {
@@ -79,7 +86,7 @@ public class Listener {
     # Detaches the attached `WhatsAppService` from the listener.
     #
     # + whatsappService - The service to detach
-    # + return - A `whatsapp:Error` (specifically a `whatsapp:ListenerError`) if detaching failed,
+    # + return - A `business:Error` (specifically a `business:ListenerError`) if detaching failed,
     #            otherwise `()`
     public function detach(WhatsAppService whatsappService) returns Error? {
         HttpService? httpService = self.httpService;
@@ -94,7 +101,7 @@ public class Listener {
 
     # Starts the listener.
     #
-    # + return - A `whatsapp:Error` (specifically a `whatsapp:ListenerError`) if the listener could
+    # + return - A `business:Error` (specifically a `business:ListenerError`) if the listener could
     #            not be started, otherwise `()`
     public function 'start() returns Error? {
         error? result = self.httpListener.'start();
@@ -105,7 +112,7 @@ public class Listener {
 
     # Gracefully stops the listener, allowing in-flight requests to complete.
     #
-    # + return - A `whatsapp:Error` (specifically a `whatsapp:ListenerError`) if the listener could
+    # + return - A `business:Error` (specifically a `business:ListenerError`) if the listener could
     #            not be stopped, otherwise `()`
     public function gracefulStop() returns Error? {
         error? result = self.httpListener.gracefulStop();
@@ -116,7 +123,7 @@ public class Listener {
 
     # Immediately stops the listener.
     #
-    # + return - A `whatsapp:Error` (specifically a `whatsapp:ListenerError`) if the listener could
+    # + return - A `business:Error` (specifically a `business:ListenerError`) if the listener could
     #            not be stopped, otherwise `()`
     public function immediateStop() returns Error? {
         error? result = self.httpListener.immediateStop();
