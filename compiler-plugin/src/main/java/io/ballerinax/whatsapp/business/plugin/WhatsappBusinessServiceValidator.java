@@ -90,12 +90,20 @@ public class WhatsappBusinessServiceValidator {
 
         FunctionTypeSymbol functionTypeSymbol = methodSymbol.typeDescriptor();
         List<ParameterSymbol> parameters = functionTypeSymbol.params().orElse(List.of());
-        if (parameters.size() != 1) {
+        if (parameters.isEmpty() || parameters.size() > 2 || functionTypeSymbol.restParam().isPresent()) {
             context.reportDiagnostic(PluginUtils.getDiagnostic(CompilationErrors.INVALID_PARAMETER_COUNT,
-                    DiagnosticSeverity.ERROR, functionDefinitionNode.location(), name));
-        } else if (!isExpectedEventType(parameters.get(0).typeDescriptor(), expectedParamType)) {
-            context.reportDiagnostic(PluginUtils.getDiagnostic(CompilationErrors.INVALID_PARAMETER_TYPE,
                     DiagnosticSeverity.ERROR, functionDefinitionNode.location(), name, expectedParamType));
+        } else {
+            if (!isExpectedEventType(parameters.get(0).typeDescriptor(), expectedParamType)) {
+                context.reportDiagnostic(PluginUtils.getDiagnostic(CompilationErrors.INVALID_PARAMETER_TYPE,
+                        DiagnosticSeverity.ERROR, functionDefinitionNode.location(), name, "first",
+                        expectedParamType));
+            }
+            if (parameters.size() == 2 && !isExpectedEventType(parameters.get(1).typeDescriptor(), "Caller")) {
+                context.reportDiagnostic(PluginUtils.getDiagnostic(CompilationErrors.INVALID_PARAMETER_TYPE,
+                        DiagnosticSeverity.ERROR, functionDefinitionNode.location(), name, "second",
+                        "business:Caller"));
+            }
         }
 
         Optional<TypeSymbol> returnType = functionTypeSymbol.returnTypeDescriptor();

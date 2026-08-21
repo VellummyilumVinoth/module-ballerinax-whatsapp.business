@@ -38,6 +38,10 @@ import io.ballerina.runtime.api.values.BString;
  * the pattern used by other Ballerina connectors whose listener handlers are optional (e.g.
  * RabbitMQ's {@code onMessage}/{@code onRequest}/{@code onError}).</p>
  *
+ * <p>A declared handler may take either one parameter (just the event) or two (the event, then a
+ * {@code Caller} for manual acknowledgement) — which form is present is detected here from the
+ * declared method's parameter count.</p>
+ *
  * @since 2.0.0
  */
 public final class HandlerDispatcher {
@@ -46,18 +50,22 @@ public final class HandlerDispatcher {
     }
 
     /**
-     * Invokes the named handler on the given service object with the given event, if the service
-     * declares that handler. Does nothing (returns {@code null}, i.e. Ballerina {@code ()}) if the
-     * handler is not declared.
+     * Invokes the named handler on the given service object with the given event (and, if the
+     * handler declares a second parameter, the given caller), if the service declares that
+     * handler. Does nothing (returns {@code null}, i.e. Ballerina {@code ()}) if the handler is
+     * not declared.
      *
      * @param env           the Ballerina runtime environment for this call
      * @param serviceObject the {@code WhatsAppService} implementation attached to the listener
      * @param methodName    the handler's name, e.g. {@code onMessages}
-     * @param event         the event record to pass as the handler's sole argument
+     * @param event         the event record to pass as the handler's first argument
+     * @param caller        the {@code Caller} to pass as the handler's second argument, only if it
+     *                      declares one
      * @return the handler's result ({@code null} for {@code ()}, a {@code BError} for an error),
      *         or {@code null} if no such handler is declared
      */
-    public static Object invokeIfPresent(Environment env, BObject serviceObject, BString methodName, Object event) {
+    public static Object invokeIfPresent(Environment env, BObject serviceObject, BString methodName, Object event,
+            BObject caller) {
         String name = methodName.getValue();
         MethodType method = findMethod(serviceObject, name);
         if (method == null) {
@@ -66,6 +74,9 @@ public final class HandlerDispatcher {
         Runtime runtime = env.getRuntime();
         boolean isConcurrentSafe = isIsolated(serviceObject, name);
         StrandMetadata strandMetadata = new StrandMetadata(isConcurrentSafe, null);
+        if (method.getParameters().length == 2) {
+            return runtime.callMethod(serviceObject, name, strandMetadata, event, caller);
+        }
         return runtime.callMethod(serviceObject, name, strandMetadata, event);
     }
 

@@ -21,14 +21,16 @@ import ballerina/log;
 # Invokes the named handler on `whatsappService` with `argument`, if (and only if) the service
 # declares that handler; since `WhatsAppService` declares no remote methods (all ten handlers are
 # optional), there is no statically bound method to call directly, so this dispatches
-# reflectively via the native (Java) runtime.
+# reflectively via the native (Java) runtime. If the handler declares a second parameter, `caller`
+# is passed as its second argument too, so it can be typed `Caller` for manual acknowledgement.
 #
 # + whatsappService - The attached `WhatsAppService` implementation
 # + methodName - The handler's name, e.g. `onMessages`
-# + argument - The record to pass as the handler's sole argument
+# + argument - The record to pass as the handler's sole (or first, if two) argument
+# + caller - Passed as the handler's second argument if (and only if) it declares one
 # + return - The handler's result, or `()` if it does not declare that handler
-isolated function invokeHandlerIfPresent(WhatsAppService whatsappService, string methodName, any argument)
-        returns error? = @java:Method {
+isolated function invokeHandlerIfPresent(WhatsAppService whatsappService, string methodName, any argument,
+        Caller caller) returns error? = @java:Method {
     name: "invokeIfPresent",
     'class: "io.ballerinax.whatsapp.business.HandlerDispatcher"
 } external;
@@ -41,9 +43,11 @@ isolated function invokeHandlerIfPresent(WhatsAppService whatsappService, string
 # + handlerError - The error the failed handler returned
 # + 'field - The webhook field being dispatched when the handler failed
 # + payload - The raw `value` object that was being dispatched
-isolated function invokeOnError(WhatsAppService whatsappService, error handlerError, string 'field, json payload) {
+# + caller - Passed as `onError`'s second argument if (and only if) it declares one
+isolated function invokeOnError(WhatsAppService whatsappService, error handlerError, string 'field, json payload,
+        Caller caller) {
     HandlerError errorInfo = {'error: handlerError, 'field, payload};
-    error? result = invokeHandlerIfPresent(whatsappService, "onError", errorInfo);
+    error? result = invokeHandlerIfPresent(whatsappService, "onError", errorInfo, caller);
     if result is error {
         log:printError(ERR_ON_ERROR_HANDLER, result, 'field = 'field);
     }
@@ -289,11 +293,13 @@ service class HttpService {
     private final WhatsAppService whatsappService;
     private final string verifyToken;
     private final string appSecret;
+    private final boolean autoAck;
 
-    function init(WhatsAppService whatsappService, string verifyToken, string appSecret) {
+    function init(WhatsAppService whatsappService, string verifyToken, string appSecret, boolean autoAck) {
         self.whatsappService = whatsappService;
         self.verifyToken = verifyToken;
         self.appSecret = appSecret;
+        self.autoAck = autoAck;
     }
 
     # Webhook subscription verification handshake. Meta calls this once when the callback URL is
@@ -313,12 +319,13 @@ service class HttpService {
         return <http:Forbidden>{body: ERR_WEBHOOK_VERIFICATION_FAILED};
     }
 
-    # Inbound notification handler. Verifies the payload signature, acknowledges immediately, then
-    # parses the envelope and dispatches each message/status/event. Meta requires a fast 2xx
-    # (retries otherwise), so the acknowledgement is sent before the potentially slow handler
-    # invocations run.
+    # Inbound notification handler. Verifies the payload signature, then parses the envelope and
+    # dispatches each message/status/event. If `autoAck` is set (the default), acknowledges
+    # immediately — before dispatching — since Meta requires a fast 2xx (retries otherwise);
+    # otherwise, acknowledgement is left to the dispatched handler via the `Caller` it's given as
+    # its optional second parameter.
     #
-    # + caller - The HTTP caller used to send the acknowledgement before dispatching
+    # + caller - The HTTP caller used to acknowledge the notification (directly, or via a `Caller`)
     # + request - The inbound webhook notification request
     # + return - An error if the acknowledgement could not be sent; errors from dispatching the
     #            parsed event to the `WhatsAppService` are logged instead of returned
@@ -344,13 +351,21 @@ service class HttpService {
             return caller->respond(<http:BadRequest>{body: ERR_PAYLOAD_PARSE_FAILED});
         }
 
-        // Acknowledge receipt first so Meta does not retry, then dispatch (handlers may be slow,
-        // e.g. an AI agent invocation).
-        check caller->respond(<http:Ok>{});
-        self.dispatch(payload);
+        Caller ackCaller = new (caller);
+        if self.autoAck {
+            // Acknowledge receipt first so Meta does not retry, then dispatch (handlers may be
+            // slow, e.g. an AI agent invocation). The `Caller` passed to the handler already
+            // considers itself acknowledged, so a handler that also declares one and calls
+            // `caller->complete()` anyway is a safe no-op.
+            check ackCaller->complete();
+        }
+        // With autoAck false, acknowledgement is the dispatched handler's responsibility, via its
+        // `Caller` parameter — if it never acknowledges, this connector never responds, and Meta's
+        // own retry-then-give-up behavior is all that follows.
+        self.dispatch(payload, ackCaller);
     }
 
-    function dispatch(json payload) {
+    function dispatch(json payload, Caller caller) {
         WebhookNotification|error notification = payload.cloneWithType();
         if notification is error {
             log:printError(ERR_NOTIFICATION_PARSE_FAILED, notification);
@@ -393,10 +408,10 @@ service class HttpService {
                             Messages messagesNotification = toMessages(phoneNumberId, typedMessages, entryTimestamp,
                                     valueJson);
                             error? result = invokeHandlerIfPresent(self.whatsappService, "onMessages",
-                                    messagesNotification);
+                                    messagesNotification, caller);
                             if result is error {
                                 log:printError(ERR_ON_MESSAGES_HANDLER, result, phoneNumberId = phoneNumberId);
-                                invokeOnError(self.whatsappService, result, 'field, valueJson);
+                                invokeOnError(self.whatsappService, result, 'field, valueJson, caller);
                             }
                         }
                     } else if statuses is WebhookStatus[] {
@@ -414,10 +429,10 @@ service class HttpService {
                             MessageStatuses statusesNotification = toMessageStatuses(phoneNumberId, typedStatuses,
                                     entryTimestamp, valueJson);
                             error? result = invokeHandlerIfPresent(self.whatsappService, "onMessages",
-                                    statusesNotification);
+                                    statusesNotification, caller);
                             if result is error {
                                 log:printError(ERR_ON_MESSAGES_HANDLER, result, phoneNumberId = phoneNumberId);
-                                invokeOnError(self.whatsappService, result, 'field, valueJson);
+                                invokeOnError(self.whatsappService, result, 'field, valueJson, caller);
                             }
                         }
                     }
@@ -435,10 +450,10 @@ service class HttpService {
                                 AccountReviewUpdate update = toAccountReviewUpdate(wabaId, v,
                                         entryTimestamp, valueJson);
                                 error? result = invokeHandlerIfPresent(self.whatsappService,
-                                        "onAccountReviewUpdate", update);
+                                        "onAccountReviewUpdate", update, caller);
                                 if result is error {
                                     log:printError(ERR_ON_ACCOUNT_REVIEW_UPDATE_HANDLER, result, wabaId = wabaId);
-                                    invokeOnError(self.whatsappService, result, 'field, valueJson);
+                                    invokeOnError(self.whatsappService, result, 'field, valueJson, caller);
                                 }
                             }
                         }
@@ -450,10 +465,10 @@ service class HttpService {
                                 AccountUpdate update = toAccountUpdate(wabaId, v, entryTimestamp,
                                         valueJson);
                                 error? result = invokeHandlerIfPresent(self.whatsappService,
-                                        "onAccountUpdate", update);
+                                        "onAccountUpdate", update, caller);
                                 if result is error {
                                     log:printError(ERR_ON_ACCOUNT_UPDATE_HANDLER, result, wabaId = wabaId);
-                                    invokeOnError(self.whatsappService, result, 'field, valueJson);
+                                    invokeOnError(self.whatsappService, result, 'field, valueJson, caller);
                                 }
                             }
                         }
@@ -465,11 +480,11 @@ service class HttpService {
                                 BusinessCapabilityUpdate update = toBusinessCapabilityUpdate(wabaId, v,
                                         entryTimestamp, valueJson);
                                 error? result = invokeHandlerIfPresent(self.whatsappService,
-                                        "onBusinessCapabilityUpdate", update);
+                                        "onBusinessCapabilityUpdate", update, caller);
                                 if result is error {
                                     log:printError(ERR_ON_BUSINESS_CAPABILITY_UPDATE_HANDLER, result,
                                             wabaId = wabaId);
-                                    invokeOnError(self.whatsappService, result, 'field, valueJson);
+                                    invokeOnError(self.whatsappService, result, 'field, valueJson, caller);
                                 }
                             }
                         }
@@ -481,11 +496,11 @@ service class HttpService {
                                 MessageTemplateQualityUpdate update = toMessageTemplateQualityUpdate(
                                         wabaId, v, entryTimestamp, valueJson);
                                 error? result = invokeHandlerIfPresent(self.whatsappService,
-                                        "onMessageTemplateQualityUpdate", update);
+                                        "onMessageTemplateQualityUpdate", update, caller);
                                 if result is error {
                                     log:printError(ERR_ON_MESSAGE_TEMPLATE_QUALITY_UPDATE_HANDLER, result,
                                             wabaId = wabaId);
-                                    invokeOnError(self.whatsappService, result, 'field, valueJson);
+                                    invokeOnError(self.whatsappService, result, 'field, valueJson, caller);
                                 }
                             }
                         }
@@ -497,11 +512,11 @@ service class HttpService {
                                 MessageTemplateStatusUpdate update = toMessageTemplateStatusUpdate(
                                         wabaId, v, entryTimestamp, valueJson);
                                 error? result = invokeHandlerIfPresent(self.whatsappService,
-                                        "onMessageTemplateStatusUpdate", update);
+                                        "onMessageTemplateStatusUpdate", update, caller);
                                 if result is error {
                                     log:printError(ERR_ON_MESSAGE_TEMPLATE_STATUS_UPDATE_HANDLER, result,
                                             wabaId = wabaId);
-                                    invokeOnError(self.whatsappService, result, 'field, valueJson);
+                                    invokeOnError(self.whatsappService, result, 'field, valueJson, caller);
                                 }
                             }
                         }
@@ -513,10 +528,10 @@ service class HttpService {
                                 PhoneNumberNameUpdate update = toPhoneNumberNameUpdate(wabaId, v,
                                         entryTimestamp, valueJson);
                                 error? result = invokeHandlerIfPresent(self.whatsappService,
-                                        "onPhoneNumberNameUpdate", update);
+                                        "onPhoneNumberNameUpdate", update, caller);
                                 if result is error {
                                     log:printError(ERR_ON_PHONE_NUMBER_NAME_UPDATE_HANDLER, result, wabaId = wabaId);
-                                    invokeOnError(self.whatsappService, result, 'field, valueJson);
+                                    invokeOnError(self.whatsappService, result, 'field, valueJson, caller);
                                 }
                             }
                         }
@@ -528,11 +543,11 @@ service class HttpService {
                                 PhoneNumberQualityUpdate update = toPhoneNumberQualityUpdate(wabaId, v,
                                         entryTimestamp, valueJson);
                                 error? result = invokeHandlerIfPresent(self.whatsappService,
-                                        "onPhoneNumberQualityUpdate", update);
+                                        "onPhoneNumberQualityUpdate", update, caller);
                                 if result is error {
                                     log:printError(ERR_ON_PHONE_NUMBER_QUALITY_UPDATE_HANDLER, result,
                                             wabaId = wabaId);
-                                    invokeOnError(self.whatsappService, result, 'field, valueJson);
+                                    invokeOnError(self.whatsappService, result, 'field, valueJson, caller);
                                 }
                             }
                         }
@@ -542,10 +557,10 @@ service class HttpService {
                                 log:printError(ERR_WEBHOOK_VALUE_PARSE_FAILED, v, wabaId = wabaId, 'field = 'field);
                             } else {
                                 Security security = toSecurity(wabaId, v, entryTimestamp, valueJson);
-                                error? result = invokeHandlerIfPresent(self.whatsappService, "onSecurity", security);
+                                error? result = invokeHandlerIfPresent(self.whatsappService, "onSecurity", security, caller);
                                 if result is error {
                                     log:printError(ERR_ON_SECURITY_HANDLER, result, wabaId = wabaId);
-                                    invokeOnError(self.whatsappService, result, 'field, valueJson);
+                                    invokeOnError(self.whatsappService, result, 'field, valueJson, caller);
                                 }
                             }
                         }
@@ -557,11 +572,11 @@ service class HttpService {
                                 TemplateCategoryUpdate update = toTemplateCategoryUpdate(wabaId, v,
                                         entryTimestamp, valueJson);
                                 error? result = invokeHandlerIfPresent(self.whatsappService,
-                                        "onTemplateCategoryUpdate", update);
+                                        "onTemplateCategoryUpdate", update, caller);
                                 if result is error {
                                     log:printError(ERR_ON_TEMPLATE_CATEGORY_UPDATE_HANDLER, result,
                                             wabaId = wabaId);
-                                    invokeOnError(self.whatsappService, result, 'field, valueJson);
+                                    invokeOnError(self.whatsappService, result, 'field, valueJson, caller);
                                 }
                             }
                         }
