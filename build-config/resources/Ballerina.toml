@@ -8,6 +8,7 @@ repository = "https://github.com/ballerina-platform/module-ballerinax-whatsapp.b
 keywords = ["Communication/WhatsApp", "Cost/Freemium", "Vendor/Meta", "Area/Communication", "Type/Connector", "Type/Trigger"]
 icon = "icon.png"
 license = ["Apache-2.0"]
+include = ["metadata/**"]
 
 [build-options]
 observabilityIncluded = true
